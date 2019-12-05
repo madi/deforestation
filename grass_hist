@@ -1,0 +1,576 @@
+
+# mapset: stats
+
+g.region rast=s1_stack_vh.1@PERMANENT -ap
+
+r.series input=` g.list rast mapset=PERMANENT sep=comma` output=range method=range
+
+r.series input=` g.list rast mapset=PERMANENT sep=comma` output=p10,p90 \
+method=quantile,quantile quantile=0.10,0.90
+
+r.mapcalc expression="change_pix=p90-p10"
+
+r.mapcalc expression="change0.15=if(change_pix>=0.15,change_pix,null())"
+
+r.mapcalc expression="change0.15_mask=change0.15/change0.15"
+
+r.to.vect -s --overwrite input=change0.15_mask@stats output=change015 type=area
+
+########################################################################
+
+# mapset: sentinel1_images
+
+for raster in $(eval g.list rast mapset=.)
+do
+r.null map=$raster setnull=-9999-0
+done
+
+########################################################################
+
+# mapset: scaled
+
+g.region rast=s1a_iw_grd_vh_20150421t043536_20150421t043601_005577_00722e_002@sentinel1_images -ap
+
+
+#for raster in $(eval g.list rast mapset=sentinel1_images)
+#do
+#r.rescale input=$raster output=scaled_$raster to=1,255 --o
+#r.mapcalc expression="db_${raster}=10*log(scaled_${raster}, 10)"
+#done
+
+for raster in $(eval g.list rast mapset=sentinel1_images)
+do
+r.mapcalc expression="db_${raster}=10*log(${raster}, 10)" --o
+done
+
+sentinel1-timestamp.py output=sentinel1-timestamps-db-vv.txt
+sentinel1-timestamp.py output=sentinel1-timestamps-db-vh.txt
+
+t.create type=strds temporaltype=absolute \
+         output=cross_pol \
+         title="Sentinel 1 cross polarized images" \
+         description="Sentinel 1 cross polarized images"
+         
+t.create type=strds temporaltype=absolute \
+         output=like_pol \
+         title="Sentinel 1 like polarized images" \
+         description="Sentinel 1 like polarized images"
+         
+t.register --o input=cross_pol file=sentinel1-timestamps-vh.txt
+t.register --o input=like_pol file=sentinel1-timestamps-vv.txt
+
+t.create type=strds temporaltype=absolute \
+         output=db_cross_pol \
+         title="Sentinel 1 cross polarized images in decibel" \
+         description="Sentinel 1 cross polarized images in decibel (log scale)"
+         
+t.create type=strds temporaltype=absolute \
+         output=db_like_pol \
+         title="Sentinel 1 like polarized images in decibel" \
+         description="Sentinel 1 like polarized images in decibel (log scale)"
+         
+t.register --o input=db_cross_pol file=sentinel1-timestamps-db-vh.txt
+t.register --o input=db_like_pol file=sentinel1-timestamps-db-vv.txt
+
+# Export
+
+for raster in $(g.list rast mapset=. pat="db_*")
+do
+r.out.gdal --o input=$raster \
+output="/media/madi/TOSHIBA EXT/S1/S1_db/$raster.tif" format=GTiff
+done
+
+
+
+########################################################################
+
+# mapset: stats
+
+# Detect changes until detection date ~End of Jan 2018
+
+t.rast.series --o input=db_cross_pol@scaled method=quantile \
+quantile=0.05 where='start_time<"2018-01-31"' \
+output=db_cross_q0.05
+
+t.rast.series --o input=db_cross_pol@scaled method=quantile \
+quantile=0.95 where='start_time<"2018-01-31"' \
+output=db_cross_q0.95
+
+t.rast.series --o input=db_cross_pol@scaled method=range \
+where='start_time<"2018-01-31"' \
+output=db_cross_range
+
+t.rast.series input=cross_pol@scaled method=quantile \
+quantile=0.05 where='start_time<"2018-01-31"' \
+output=cross_q0.05
+
+t.rast.series input=cross_pol@scaled method=quantile \
+quantile=0.95 where='start_time<"2018-01-31"' \
+output=cross_q0.95
+
+t.rast.series input=cross_pol@scaled method=range \
+where='start_time<"2018-01-31"' \
+output=cross_range
+
+
+t.rast.series --o input=db_like_pol@scaled method=quantile \
+quantile=0.05 where='start_time<"2018-01-31"' \
+output=db_like_q0.05
+
+t.rast.series --o input=db_like_pol@scaled method=quantile \
+quantile=0.95 where='start_time<"2018-01-31"' \
+output=db_like_q0.95
+
+t.rast.series --o input=db_like_pol@scaled method=range \
+where='start_time<"2018-01-31"' \
+output=db_like_range
+
+t.rast.series input=like_pol@scaled method=quantile \
+quantile=0.05 where='start_time<"2018-01-31"' \
+output=like_q0.05
+
+t.rast.series input=like_pol@scaled method=quantile \
+quantile=0.95 where='start_time<"2018-01-31"' \
+output=like_q0.95
+
+t.rast.series input=like_pol@scaled method=range \
+where='start_time<"2018-01-31"' \
+output=like_range
+
+
+
+t.rast.series input=db_like_pol@scaled method=average \
+where='start_time<"2017-07-07"' \
+output=db_like_avg
+
+t.rast.series input=db_cross_pol@scaled method=average \
+where='start_time<"2017-07-07"' \
+output=db_cross_avg
+
+
+t.rast.series input=db_like_pol@scaled method=median \
+where='start_time<"2017-07-07"' \
+output=db_like_med
+
+t.rast.series input=db_cross_pol@scaled method=median \
+where='start_time<"2017-07-07"' \
+output=db_cross_med
+
+
+
+r.mapcalc --o expression="change_db_cross=db_cross_q0.95-db_cross_q0.05"
+r.mapcalc expression="change_cross=cross_q0.95-cross_q0.05"
+r.mapcalc --o expression="change_db_like=db_cross_q0.95-db_like_q0.05"
+r.mapcalc expression="change_like=like_q0.95-like_q0.05"
+
+
+db_vv_20180114
+db_vh_20180114
+db_diff_vv_hv_20180114
+db_s1a_iw_grd_vh_20180114t161058_20180114t161123_020153_0225fd_002
+db_s1a_iw_grd_vv_20180114t161058_20180114t161123_020153_0225fd_001
+
+# Composite of different polarizations for the same date 20180114
+
+r.mapcalc exp="db_vv_20180114_int=int(db_vv_20180114)"
+r.mapcalc exp="db_vh_20180114_int=int(db_vh_20180114)"
+r.mapcalc exp="db_diff_vv_hv_20180114_int=int(db_diff_vv_hv_20180114)"
+
+r.colors map=db_vv_20180104_int@stats color=grey.eq
+r.colors map=db_vh_20180104_int@stats color=grey.eq
+r.colors map=db_diff_vv_hv_20180114_int@stats color=grey.eq
+
+r.composite red=db_vv_20180104_int@stats green=db_vh_20180104_int@stats \
+blue=db_diff_vv_hv_20180114_int@stats output=composite_20180114
+
+r.out.gdal input=composite_20180114@stats \
+output="/media/madi/TOSHIBA EXT/S1/output/maps/composite_2018_0114.tif" \
+format=GTiff
+
+# Composite of different polarizations for the same date 20170531
+
+r.mapcalc \
+exp="db_diff_vv_hv_20170531= \
+db_s1a_iw_grd_vv_20170531t161054_20170531t161119_016828_01bfa2_001@scaled - \
+db_s1a_iw_grd_vh_20170531t161054_20170531t161119_016828_01bfa2_002@scaled"
+
+i.sar.speckle --o in=db_s1a_iw_grd_vv_20170531t161054_20170531t161119_016828_01bfa2_001@scaled \
+ out=db_vv_20170531_denoised size=21
+i.sar.speckle --o in=db_s1a_iw_grd_vh_20170531t161054_20170531t161119_016828_01bfa2_002@scaled \
+ out=db_vh_20170531_denoised size=21
+i.sar.speckle --o in=db_diff_vv_hv_20170531 out=db_diff_vv_hv_20170531_denoised size=21
+
+r.mapcalc exp="db_vh_20170531_den_int=int(db_vh_20170531_denoised)"
+r.mapcalc exp="db_vv_20170531_den_int=int(db_vv_20170531_denoised)"
+r.mapcalc exp="db_diff_vv_hv_20170531_den_int=int(db_diff_vv_hv_20170531_denoised)"
+
+r.colors map=db_vv_20170531_den_int color=grey.eq
+r.colors map=db_vh_20170531_den_int color=grey.eq
+r.colors map=db_diff_vv_hv_20170531_den_int color=grey.eq
+
+r.composite red=db_vv_20170531_den_int green=db_vh_20170531_den_int \
+ blue=db_diff_vv_hv_20170531_den_int output=composite_20170531_den --o
+
+r.out.gdal input=composite_20170531_den \
+ output="/media/madi/TOSHIBA EXT/S1/output/maps/composite_20170531_denoised.tif" \
+ format=GTiff
+
+
+
+# Residuals
+
+r.mapcalc expression=" \
+residuals_med_vv_20180114=db_s1a_iw_grd_vv_20180114t161058_20180114t161123_020153_0225fd_001 \
+- db_like_med "
+
+r.mapcalc expression=" \
+residuals_med_vh_20180114=db_s1a_iw_grd_vh_20180114t161058_20180114t161123_020153_0225fd_002 \
+- db_cross_med "
+
+r.mapcalc expression="residuals_med_vv_vh_20180114= \
+residuals_med_vv_20180114-residuals_med_vh_20180114"
+
+r.composite red=residuals_med_vv_20180114 green=residuals_med_vh_20180114 \
+blue=residuals_med_vv_vh_20180114 output=composite_residuals_20180114
+
+r.out.gdal input=composite_residuals_20180114@stats \
+output="/media/madi/TOSHIBA EXT/S1/output/maps/composite_residuals_2018_0114.tif" \
+format=GTiff
+
+# Multi-temporal composite
+
+r.mapcalc exp="db_vh_20141201_int=int(\
+db_s1a_iw_grd_vh_20141201t161038_20141201t161103_003528_004267_002@scaled)"
+
+r.mapcalc exp="db_vh_20161204_int=int(\
+db_s1a_iw_grd_vh_20161204t044354_20161204t044419_014225_016feb_002@scaled)"
+
+r.mapcalc exp="db_vh_20181216_int=int(\
+db_s1a_iw_grd_vh_20181216t161105_20181216t161130_025053_02c3a8_002@scaled)"
+
+r.colors map=db_vh_20141201_int@stats color=grey.eq
+r.colors map=db_vh_20161204_int@stats color=grey.eq
+r.colors map=db_vh_20181216_int@stats color=grey.eq
+
+r.composite red=db_vh_20141201_int@stats green=db_vh_20161204_int@stats \
+blue=db_vh_20181216_int@stats output=composite_vh_winter_2014_16_18
+
+# Denoised composite
+
+i.sar.speckle --o in=db_vv_20180114 out=db_vv_20180114_denoised size=21
+i.sar.speckle --o in=db_vh_20180114 out=db_vh_20180114_denoised size=21
+i.sar.speckle --o in=db_diff_vv_hv_20180114 out=db_diff_vv_hv_20180114_denoised size=21
+
+r.mapcalc --o exp="db_vv_20180114_den_int=int(db_vv_20180114_denoised)"
+r.mapcalc --o exp="db_vh_20180114_den_int=int(db_vh_20180114_denoised)"
+r.mapcalc --o exp="db_diff_vv_hv_20180114_den_int=int(db_diff_vv_hv_20180114_denoised)"
+
+r.colors map=db_vv_20180114_den_int color=grey.eq
+r.colors map=db_vh_20180114_den_int color=grey.eq
+r.colors map=db_diff_vv_hv_20180114_den_int color=grey.eq
+
+r.composite red=db_vv_20180114_den_int green=db_vh_20180114_den_int \
+blue=db_diff_vv_hv_20180114_den_int output=composite_20180114_den --o
+
+r.out.gdal input=composite_20180114_den \
+output="/media/madi/TOSHIBA EXT/S1/output/maps/composite_20180114_denoised.tif" \
+format=GTiff
+
+
+# Log-Ratio Scaling
+
+r.mapcalc exp="r_20181216=log((\
+db_s1a_iw_grd_vh_20181216t161105_20181216t161130_025053_02c3a8_002@scaled\
+/db_s1a_iw_grd_vh_20161204t044354_20161204t044419_014225_016feb_002@scaled),10)"
+
+r.mapcalc exp="r_20181216_int=int(r_20181216)"
+
+
+########################################################################
+
+# mapset: power
+
+for raster in $(eval g.list rast mapset=scaled pattern="db*")
+do
+r.mapcalc expression="pwr_${raster}=pow(10.,(${raster}/10.))"
+done
+
+sentinel1-timestamp.py output=sentinel1-timestamps-pwr-vv.txt
+sentinel1-timestamp.py output=sentinel1-timestamps-pwr-vh.txt
+
+t.create type=strds temporaltype=absolute \
+         output=pwr_cross_pol \
+         title="Sentinel 1 cross polarized images in power" \
+         description="Sentinel 1 cross polarized images in power"
+         
+t.create type=strds temporaltype=absolute \
+         output=pwr_like_pol \
+         title="Sentinel 1 like polarized images in power" \
+         description="Sentinel 1 like polarized images in power"
+         
+t.register --o input=pwr_cross_pol file=sentinel1-timestamps-pwr-vh.txt
+t.register --o input=pwr_like_pol file=sentinel1-timestamps-pwr-vv.txt
+
+t.create type=strds temporaltype=absolute \
+         output=pwr_vh_ascending \
+         title="Sentinel 1 cross polarized images, ascending orbit, in power" \
+         description="Sentinel 1 cross polarized images, ascending orbit, in power"
+
+t.register --o input=pwr_vh_ascending file=S1-timestamps-pwr-vh-ascending.txt
+
+
+
+########################################################################
+
+# mapset: stats
+
+t.rast.series input=pwr_cross_pol@power method=quantile \
+quantile=0.05 where='start_time<"2018-01-31"' \
+output=pwr_cross_q0.05
+
+t.rast.series input=pwr_cross_pol@power method=quantile \
+quantile=0.95 where='start_time<"2018-01-31"' \
+output=pwr_cross_q0.95
+
+t.rast.series input=pwr_cross_pol@power method=range \
+where='start_time<"2018-01-31"' \
+output=pwr_cross_range
+
+t.rast.series input=pwr_like_pol@power method=quantile \
+quantile=0.05 where='start_time<"2018-01-31"' \
+output=pwr_like_q0.05
+
+t.rast.series input=pwr_like_pol@power method=quantile \
+quantile=0.95 where='start_time<"2018-01-31"' \
+output=pwr_like_q0.95
+
+t.rast.series input=pwr_like_pol@power method=range \
+where='start_time<"2018-01-31"' \
+output=pwr_like_range
+
+
+r.mapcalc expression="change_pwr_cross=pwr_cross_q0.95-pwr_cross_q0.05"
+
+r.mapcalc expression="change_pwr_like=pwr_like_q0.95-pwr_like_q0.05"
+
+
+# Create vector and export
+
+r.mapcalc expression="change_db_cross_mask=change_db_cross/change_db_cross"
+r.to.vect -s --o input=change_db_cross_mask output=change_db_cross type=area 
+v.out.ogr input=change_db_cross \
+output="/media/madi/TOSHIBA EXT/S1/output/change_db_cross" format=ESRI_Shapefile
+
+r.mapcalc expression="change_db_like_mask=change_db_like/change_db_like"
+r.to.vect -s --o input=change_db_like_mask output=change_db_like type=area 
+v.out.ogr input=change_db_like \
+output="/media/madi/TOSHIBA EXT/S1/output/change_db_like" format=ESRI_Shapefile
+
+
+# Create time series over logging sites
+
+v.strds.stats input=big_areas2_test strds=db_cross_pol@scaled \
+output=backscatter_big_areas_cross3 method=average --o --verbose
+
+v.db.select --o map=backscatter_big_areas_cross3 separator=comma \
+file="/media/madi/TOSHIBA EXT/S1/output/files/backscatter_big_areas_cross3.csv"
+
+
+
+v.strds.stats input=big_areas2_test strds=db_like_pol@scaled \
+output=backscatter_big_areas_like3 method=average --o --verbose
+
+v.db.select --o map=backscatter_big_areas_like3 separator=comma \
+file="/media/madi/TOSHIBA EXT/S1/output/files/backscatter_big_areas_like3.csv"
+
+
+# v.strds.stats non riesce a fare la query su molti dei poligoni
+# e restituisce una tabella vuota
+# test
+v.strds.stats in=big_areas2@PERMANENT where="cat == '1'" \
+strds=db_cross_pol@scaled out=test method=average --o
+
+
+t.info db_cross_pol@scaled
+g.gui.timeline -3 input=db_cross_pol@scaled
+t.rast.colors input=db_cross_pol@scaled color=grey -e
+g.gui.animation strds=db_cross_pol@scaled
+
+
+
+########################################################################
+
+# mapset PERMANENT
+
+r.mask vect=national_park_wo_forest_loss
+t.rast.univar input=db_like_pol@scaled \
+output="/media/madi/TOSHIBA EXT/S1/output/files/national_park_like.csv" --o
+t.rast.univar input=db_cross_pol@scaled \
+output="/media/madi/TOSHIBA EXT/S1/output/files/national_park_cross.csv" --o
+r.mask -r
+
+
+
+########################################################################
+# preproc
+
+# Rescale imagery Digital Numbers to db
+grass -text "$mapset" --exec r.mapcalc --o expression="${file}.${band}=10*log(${file}.${band}_dn, 10)"
+
+dB= 10* log (DN)
+
+for rast in `g.list rast mapset=PERMANENT sep=comma`
+r.mapcalc expression="rast_dB=10*log(rast, 10)"
+
+
+# Add timestamp
+grass -text "$mapset" --exec r.timestamp --o --q map=${file}.$band date="${a_start}/${a_end}"
+# Compute difference bands
+grass -text "$mapset" --exec r.mapcalc --o expression="${file}.${t}0_VH_VV=${file}.${t}0_VH-${file}.${t}0_VV"
+# Add timestamp
+grass -text "$mapset" --exec r.timestamp --o --q map=${file}.${t}0_VH_VV date="${a_start}/${a_end}"
+
+
+https://forum.step.esa.int/t/db-or-dn-for-image-processing/4823/11
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+########################################################################
+
+# mapset: scaled
+
+# Detect changes until detection date ~End of Jan 2018
+# using only ascending
+
+t.create type=strds temporaltype=absolute \
+         output=db_vh_ascending \
+         title="Sentinel 1 cross polarized ascending in db" \
+         description="Sentinel 1 cross polarized ascending orbit in decibel"
+         
+t.register --o input=db_vh_ascending file=S1-timestamps-db-vh-ascending.txt
+
+# mapset: stats
+
+# Mask out non forest
+r.mask raster=forest@PERMANENT
+
+t.rast.series --o input=db_vh_ascending@scaled method=quantile \
+quantile=0.10  \
+output=db_cross_ascending_q0.10
+
+t.rast.series --o input=db_vh_ascending@scaled method=quantile \
+quantile=0.90 \
+output=db_cross_ascending_q0.90
+
+r.mapcalc --o expression="change_db_vh_ascending_10.90=db_cross_ascending_q0.90 \
+ -db_cross_ascending_q0.10"
+
+t.rast.series --o input=pwr_vh_ascending@power method=quantile \
+quantile=0.10  \
+output=pwr_vh_ascending_q0.10
+
+t.rast.series --o input=pwr_vh_ascending@power method=quantile \
+quantile=0.90 \
+output=pwr_vh_ascending_q0.90
+
+r.mapcalc --o expression="change_pwr_vh_ascending_10.90=pwr_vh_ascending_q0.90 \
+ -pwr_vh_ascending_q0.10"
+
+t.rast.series --o input=db_vh_ascending@scaled method=quantile \
+quantile=0.05 \
+output=db_cross_ascending_q0.05
+
+t.rast.series --o input=db_vh_ascending@scaled method=quantile \
+quantile=0.95  \
+output=db_cross_ascending_q0.95
+
+t.rast.series --o input=db_vh_ascending@scaled method=range \
+output=db_cross_ascending_range
+
+r.mapcalc --o expression="change_db_vh_ascending=db_cross_ascending_q0.95 \
+-db_cross_ascending_q0.05"
+
+
+
+t.rast.series --o input=pwr_vh_ascending@power method=quantile \
+quantile=0.05  \
+output=pwr_vh_ascending_q0.05
+
+t.rast.series --o input=pwr_vh_ascending@power method=quantile \
+quantile=0.95 \
+output=pwr_vh_ascending_q0.95
+
+r.mapcalc --o expression="change_pwr_vh_ascending=pwr_vh_ascending_q0.95 \
+ -pwr_vh_ascending_q0.05"
+
+t.rast.series --o input=pwr_vh_ascending@power method=range \
+output=pwr_vh_ascending_range
+
+
+r.mask -r
+
+########################################################################
+
+r.mask raster=forest@PERMANENT
+
+# Coeff of variation (variance / mean)
+
+t.rast.series --o input=pwr_vh_ascending@power method=variance \
+output=pwr_vh_ascending_var
+
+t.rast.series --o input=pwr_vh_ascending@power method=average \
+output=pwr_vh_ascending_mean
+
+r.mapcalc exp="pwr_vh_asc_coeff_var=pwr_vh_ascending_var/pwr_vh_ascending_mean"
+
+
+
+r.mask -r
+
+########################################################################
+
+r.mapcalc --o expression="change_pwr=if(change_pwr_vh_ascending<0.045,1, \
+(if(change_pwr_vh_ascending>0.06,2,null())))"
+
+r.to.vect -s input=change_pwr@stats output=change_pwr type=area
+
+v.out.ogr input=change_pwr@stats \
+output="/media/madi/TOSHIBA EXT/S1/output/maps/change_pwr.gpkg" format=GPKG
+
+v.extract input=change_pwr@stats where="value =1" output=change_pwr_loss
+
+v.extract input=change_pwr@stats where="value =2" output=change_pwr_shadow
+
+v.out.ogr input=change_pwr_loss \
+output="/media/madi/TOSHIBA EXT/S1/output/maps/change_pwr_loss.gpkg" format=GPKG
+
+v.out.ogr input=change_pwr_shadow \
+output="/media/madi/TOSHIBA EXT/S1/output/maps/change_pwr_shadow.gpkg" format=GPKG
+
+
+########################################################################
+
+# Mapset: change_validation
+
+g.region rast=db_s1a_iw_grd_vh_20141004t044342_20141004t044407_002675_002fbb_002 -p
+
+v.strds.stats input=change_pwr_loss strds=db_vh_ascending@scaled \
+output=backscatter_change_pwr method=average --o 
+
+v.db.select --o map=backscatter_change_pwr separator=comma \
+file="/media/madi/TOSHIBA EXT/S1/output/files/backscatter_change_pwr.csv"
+
+
+
+
