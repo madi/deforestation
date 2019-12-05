@@ -1,0 +1,391 @@
+# Mapset Sentinel2A_v5
+
+# Importo le immagini 
+# No filtri
+# 961immagini 
+
+python parse_sentinel_pattern.py lista_S2.txt > lista_S2_clean.txt
+
+chmod u+x create_cmd.sh
+./create_cmd.sh  lista_S2_clean.txt > cmd.sh
+
+chmod u+x cmd.sh
+
+# da grass
+# mapset: Sentinel2A_v5
+
+./cmd.sh
+
+#### 
+
+sentinel-timestamp.py output=sentinel-timestamps.txt
+
+t.create --o output=sentinel title="Sentinel L2A from 2015-06-23" \
+desc="Sentinel L2A from 2015-06-23 to 2019-4-10"
+
+t.register --o input=sentinel file=sentinel-timestamps.txt
+
+t.info input=sentinel
+
+t.rast.list input=sentinel
+
+## # NDVI ST computation
+
+# For NDVI computation 4th and 8th bands are required. Map algebra is 
+# performed in the case of spatio-temporal data by t.rast.mapcalc which 
+# requires data separated into spatio-temporal datasets. Such datasets 
+# can be prepared by t.rast.extract.
+
+t.rast.extract --o input=sentinel where="name like '%B04%'" output=b4
+t.rast.extract --o input=sentinel where="name like '%B08%'" output=b8
+
+# check content of the new datasets by t.rast.list.
+t.info input=b4
+t.info input=b8
+t.rast.list input=b4
+t.rast.list input=b8
+
+g.region vector=aoi_bialo align=T34UGD_20181014T093031_B08_10m -p
+r.mask vector=aoi_bialo
+
+t.rast.aggregate --o input=b4 output=b4_agg basename=b4_agg granularity="1 days" \
+method=maximum nprocs=80 --o
+t.rast.aggregate --o input=b8 output=b8_agg basename=b8_agg granularity="1 days" \
+method=maximum nprocs=80 --o
+
+t.info input=b4_agg
+t.info input=b8_agg
+
+
+# Occorre applicare la cloud mask per ottenere un NDVI che abbia senso
+# Quindi dobbiamo creare delle mappe raster da usare come mask con sentinel-cloud-mask.py 
+# che applica il timestamp alla cloud mask. Ho modificato sentinel-cloud-mask.py per tener 
+# conto della differente denominazione dei files
+
+### mapset scene_classification
+
+# preparo la lista delle scene classification ottenute da sen2cor 
+# nel terminale
+python list_cloud_cover_files.py
+
+# importo in grass
+# da grass (mapset scene_classification_v5)
+./import_sen2cor_cloud_mask.sh
+
+g.region vector=aoi_bialo@PERMANENT align=T34UFD_20180430T114456_SCL_20m -p
+
+r.mask vector=aoi_bialo@PERMANENT
+
+for RASTER in `g.list raster mapset=.`
+do
+    r.reclass input=$RASTER output=$RASTER\_reclass rules=reclass_scene_rules.txt \
+    title="binary mask for cloud shadows, cloud high and medium probability and thin cirrus"
+    r.mapcalc $RASTER\_MSK=$RASTER\_reclass
+done
+
+
+
+t.create --o output=scl_cloud title="cloud cover from scl" \
+desc="Cloud cover masks obtained by sen2cor scene classification of sentinel 2A over Bialowieza AOI"
+
+scl-timestamp.py output=scl-timestamps.txt
+
+t.register input=scl_cloud file=scl-timestamps.txt --o
+
+t.rast.aggregate input=scl_cloud output=scl_cloud_agg \
+basename=scl_cloud_agg granularity="1 days" method=average nprocs=80 --o
+
+t.info input=scl_cloud_agg
+t.rast.list input=scl_cloud_agg
+
+
+
+##### Mapset: ndvi_no_cloud
+# Set access permission to mapsets Sentinel2A_v5, @scene_classification_v5 (g.mapsets)
+
+g.region vector=aoi_bialo@PERMANENT align=b4_agg_2015_12_22@Sentinel2A_v5 -p
+
+t.rast.mapcalc input=b4_agg@Sentinel2A_v5,b8_agg@Sentinel2A_v5 output=ndvi_agg \
+expression="float(b8_agg@Sentinel2A_v5 - b4_agg@Sentinel2A_v5) / (b8_agg@Sentinel2A_v5 + b4_agg@Sentinel2A_v5)" \
+basename=ndvi_agg nproc=80 --o
+
+t.info ndvi_agg
+
+t.rast.colors input=ndvi_agg color=ndvi
+
+g.gui.animation strds=ndvi_agg
+
+g.gui.timeline -3 input=ndvi_agg
+
+
+
+
+##### Mapset: ndvi_v5
+# Set access permission to mapsets Sentinel2A_v5, @scene_classification_v5 (g.mapsets)
+# NDVI computation with cloud cover
+
+#g.region vector=aoi_bialo@PERMANENT align=L2A_T34UFD_20170902T094031_B04_10m@Sentinel2A_v5 -p
+g.region vector=aoi_bialo@PERMANENT align=b4_agg_2015_12_22@Sentinel2A_v5 -p
+
+t.rast.mapcalc input=b4_agg@Sentinel2A_v5,b8_agg@Sentinel2A_v5,scl_cloud_agg@scene_classification_v5 output=ndvi_scl_agg \
+expression="if(isnull(scl_cloud_agg@scene_classification_v5), null(), float(b8_agg@Sentinel2A_v5 - b4_agg@Sentinel2A_v5) / (b8_agg@Sentinel2A_v5 + b4_agg@Sentinel2A_v5))" \
+basename=ndvi_scl_agg nproc=80 --o
+
+t.info ndvi_scl_agg
+
+t.rast.colors input=ndvi_scl_agg color=ndvi
+
+
+
+
+
+
+# Export animation with g.gui.animation
+
+g.gui.animation strds=ndvi_scl_agg
+
+g.gui.timeline -3 input=ndvi_scl_agg
+
+#########
+
+#t.unregister type=raster input=ndvi_scl_cloud_agg \
+maps=ndvi_scl_cloud_agg_093,ndvi_scl_cloud_agg_113
+
+
+
+/////////////////////////////////////////////
+
+ 
+
+
+####################### NO #######################
+
+# mapset logging 
+
+g.copy vect=logging_areas_20180110,logging_areas_20180110_copy
+g.copy vect=Logging_detection_after01Jan2018_v1,Logging_detection_after01Jan2018_v1_copy
+
+# ho ripulito le colonne per patchare
+v.patch input=logging_areas_20180110_copy,Logging_detection_after01Jan2018_v1_copy output=areas_patched -e
+
+# create column for area in hectares
+
+v.db.addcolumn map=areas_patched columns='App_area_h double precision'
+v.to.db map=areas_patched@logging option=area columns=App_area_h units=hectares
+
+v.to.db map=areas_patched_1@logging option=area columns=App_area_h units=hectares
+
+v.overlay ainput=areas_patched binput=areas_patched_1 output=areas_patched_diff op=xor --o
+
+# Rename columns to match areas_patched....
+
+# Patch together areas_patched,areas_patched_diff
+v.patch input=areas_patched,areas_patched_diff output=areas_patched_tot -e --o
+
+# filtrare le aree piu grandi di 0.5 Ha (aree)
+v.extract input=areas_patched_tot output=big_areas where="App_area_h > 0.5"
+
+
+####################### ## #######################
+
+
+# mapset logging
+
+ho importato big_areas dall altro progetto
+
+
+
+
+
+
+
+
+
+
+/////////////////////////////////////////////
+
+
+
+####################### NO #######################
+# mapset PERMANENT
+
+# ho importato national_park_wo_forest_loss dall'altro progetto
+
+# incrociare il national park con Hansen (band2 forest loss)
+# per selezionare le aree bark-beetle-free e calcolare NDVI sull'intero poligono
+
+#r.null map=HansenBialowieza.2@PERMANENT setnull=0
+
+#r.to.vect input=HansenBialowieza.2@PERMANENT output=forest_loss type=area
+
+#v.overlay ainput=Bialowieza_National_Park_Narodowy@PERMANENT binput=forest_loss@PERMANENT \
+operator=and output=forest_loss_in_national_park
+
+#v.overlay ainput=Bialowieza_National_Park_Narodowy \
+binput=forest_loss_in_national_park operator=not output=national_park_wo_forest_loss
+
+r.mask vect=national_park_wo_forest_loss
+t.rast.univar input=ndvi_agg@Sentinel2A_v5 output=national_park_wo_loss_scl_NDVI.csv --o
+r.mask -r
+
+#t.rast.univar input=ndvi_agg@Sentinel2A_v5 output=stats_wo_mask.csv --o
+
+####################### ## #######################
+
+
+
+# mapset PERMANENT
+
+r.mask vect=national_park_wo_forest_loss
+t.rast.univar input=ndvi_agg@ndvi_no_cloud output=national_park_wo_loss_NDVI.csv --o
+r.mask -r
+
+# v.strds.stats (addon)
+
+v.strds.stats input=big_areas@logging strds=ndvi_agg@ndvi_no_cloud \
+output=ndvi_big_areas method=average --o --verbose
+
+v.db.select --o map=ndvi_big_areas@PERMANENT separator=comma file=/home/leomarg/ndvi_big_areas1.csv
+
+v.overlay --o ainput=radar_th2_big@Langner_change_det binput=aoi_bialo@PERMANENT operator=and output=ndvi_radar_aoi
+
+v.strds.stats input=ndvi_radar_aoi strds=ndvi_agg@ndvi_no_cloud \
+output=ndvi_radar_aoi_avg method=average --o --verbose
+
+v.db.select --o map=ndvi_radar_aoi_avg@PERMANENT separator=comma file=/home/leomarg/ndvi_radar1.csv
+
+
+####################### ## #######################
+
+# Mapset Sentinel2A_v5
+t.rast.extract --o input=sentinel where="name like '%B12%'" output=b12
+
+t.rast.extract --o input=sentinel where="name like '%B8A%'" output=b8a
+
+
+
+
+
+
+##### Mapset: nbr_no_cloud
+# Set access permission to mapsets Sentinel2A_v5, @scene_classification_v5 (g.mapsets)
+
+g.region vector=aoi_bialo@PERMANENT align=L2A_T34UGD_20180102T093359_B8A_20m@Sentinel2A_v5 -p
+
+t.rast.aggregate --o input=b8a@Sentinel2A_v5 output=b8a_agg basename=b8a_agg granularity="1 days" \
+method=maximum nprocs=80 --o
+
+t.rast.aggregate --o input=b12@Sentinel2A_v5 output=b12_agg basename=b12_agg granularity="1 days" \
+method=maximum nprocs=80 --o
+
+t.rast.mapcalc input=b12_agg,b8a_agg output=nbr_agg \
+expression="float(b8a_agg - b12_agg) / (b8a_agg + b12_agg)" \
+basename=nbr_agg nproc=80 --o
+
+
+### Export of results
+/storage/leomarg/Documents/v5/results
+
+# mapset PERMANENT
+
+v.strds.stats input=big_areas@logging strds=ndvi_agg@ndvi_no_cloud \
+output=ndvi_big_areas method=average --o --verbose
+
+v.db.select --o map=ndvi_big_areas@PERMANENT separator=comma file=/storage/leomarg/Documents/v5/results/ndvi_big_areas1.csv
+
+v.strds.stats input=big_areas@logging strds=nbr_agg@nbr_no_cloud \
+output=nbr_big_areas method=average --o --verbose
+
+v.db.select --o map=nbr_big_areas@PERMANENT separator=comma file=/storage/leomarg/Documents/v5/results/nbr_big_areas1.csv
+
+r.mask vect=national_park_wo_forest_loss
+t.rast.univar input=ndvi_agg@ndvi_no_cloud output=/storage/leomarg/Documents/v5/results/national_park_NDVI.csv --o
+t.rast.univar input=nbr_agg@nbr_no_cloud output=/storage/leomarg/Documents/v5/results/national_park_NBR.csv --o
+
+r.mask -r
+
+####################### ## #######################
+
+v.strds.stats input=radar_th2_big@Langner_change_det strds=ndvi_agg@ndvi_no_cloud \
+output=ndvi_radar_big method=average --o --verbose
+
+v.db.select --o map=ndvi_radar_big@PERMANENT separator=comma file=/storage/leomarg/Documents/v5/results/ndvi_radar_big1.csv
+
+v.strds.stats input=radar_th2_big@Langner_change_det strds=nbr_agg@nbr_no_cloud \
+output=nbr_radar_big method=average --o --verbose
+
+v.db.select --o map=nbr_radar_big@PERMANENT separator=comma file=/storage/leomarg/Documents/v5/results/nbr_radar_big1.csv
+
+###############################
+
+# Clouds
+
+# mapset Sentinel2A_v5
+
+sentinel-cloud-mask.py map=aoi_bialo@PERMANENT output=sentinel-cloud.txt
+
+# create a new space time dataset with raster cloud masks registered
+
+t.create output=cloud title="Sentinel L2A (cloud)" desc="Bialowieza AOI"
+t.register input=cloud file=sentinel-cloud.txt --o
+
+t.rast.aggregate --o input=cloud output=cloud_agg basename=cloud_agg granularity="1 days" \
+method=max_raster nprocs=80 --o
+
+
+# mapset ndvi_cloud
+# NDVI computation with cloud cover
+
+g.region vector=aoi_bialo@PERMANENT align=b4_agg_2015_12_22@Sentinel2A_v5 -p
+
+t.rast.mapcalc input=b4_agg@Sentinel2A_v5,b8_agg@Sentinel2A_v5,cloud_agg@Sentinel2A_v5 output=ndvi_cloud \
+expression="if(isnull(cloud_agg@Sentinel2A_v5), null(), float(b8_agg@Sentinel2A_v5 - b4_agg@Sentinel2A_v5) / ( b8_agg@Sentinel2A_v5 + b4_agg@Sentinel2A_v5 ))" \
+basename=ndvi_cloud nproc=80 --o
+
+t.info ndvi_cloud
+
+t.rast.colors input=ndvi_cloud color=ndvi
+
+# Export animation with g.gui.animation
+
+g.gui.animation strds=ndvi_cloud
+
+g.gui.timeline -3 input=ndvi_cloud
+
+
+########################################################################
+
+#mapset validation
+g.region vector=aoi_bialo@PERMANENT align=b4_agg_2015_12_22@Sentinel2A_v5 -p
+
+v.strds.stats input=change_pwr_loss strds=ndvi_agg@ndvi_no_cloud \
+output=ndvi_change method=average --o --verbose
+
+v.db.select --o map=ndvi_change separator=comma \
+file="/media/madi/TOSHIBA EXT/Bialo/S2_results/ndvi_change.csv"
+
+
+v.strds.stats input=change_pwr_loss strds=nbr_agg@nbr_no_cloud \
+output=nbr_change method=average --o --verbose
+
+v.db.select --o map=nbr_change separator=comma \
+file="/media/madi/TOSHIBA EXT/Bialo/S2_results/nbr_change.csv"
+
+
+v.strds.stats input=change_pwr_loss strds=ndvi_scl_agg@ndvi_v5 \
+output=ndvi_scl_v5_change method=average --o --verbose
+
+v.db.select --o map=ndvi_scl_v5_change separator=comma \
+file="/media/madi/TOSHIBA EXT/Bialo/S2_results/ndvi_scl_v5_change.csv"
+
+
+
+
+
+
+
+
+
+
+
+
