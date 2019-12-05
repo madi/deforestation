@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE gxw SYSTEM "grass-gxw.dtd">
+<gxw>
+    <session>
+        <database>/media/madi/TOSHIBA EXT/S1/grassdata</database>
+        <location>S1</location>
+        <mapset>stats</mapset>
+    </session>
+    <layer_manager dim="67,27,625,600">
+    </layer_manager>
+    <display name="Display 1" render="1" mode="0" showCompExtent="1" alignExtent="1" constrainRes="0" showStatusbar="1" showToolbars="1" dim="752,27,1157,1044" extent="676843.209878,5841854.994571,678249.267051,5843006.622350,0.000000,1.000000" tbres="1.000000" viewMode="2d" >
+        <layer type="vector" name="change_pwr_loss@stats" checked="1" opacity="1.000000">
+            <task name="d.vect">
+                <parameter name="map">
+                    <value>change_pwr_loss@stats</value>
+                </parameter>
+                <parameter name="color">
+                    <value>255:0:0:255</value>
+                </parameter>
+                <parameter name="fill_color">
+                    <value>none</value>
+                </parameter>
+            </task>
+        </layer>
+        <layer type="vector" name="big_areas2_test@stats" checked="0" opacity="1.000000">
+            <task name="d.vect">
+                <parameter name="map">
+                    <value>big_areas2_test@stats</value>
+                </parameter>
+                <parameter name="color">
+                    <value>255:165:0:255</value>
+                </parameter>
+                <parameter name="fill_color">
+                    <value>none</value>
+                </parameter>
+            </task>
+        </layer>
+        <layer type="raster" name="change_pwr_vh_ascending@stats" checked="1" opacity="1.000000">
+            <task name="d.rast">
+                <parameter name="map">
+                    <value>change_pwr_vh_ascending@stats</value>
+                </parameter>
+            </task>
+        </layer>
+        <layer type="raster" name="pwr_vh_asc_coeff_var@stats" checked="1" opacity="1.000000">
+            <task name="d.rast">
+                <parameter name="map">
+                    <value>pwr_vh_asc_coeff_var@stats</value>
+                </parameter>
+            </task>
+        </layer>
+    </display>
+</gxw>
